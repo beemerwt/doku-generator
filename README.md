@@ -23,7 +23,7 @@ cargo run --release -- generate \
   --workers 8
 ```
 
-The first implementation is single-threaded even when `--workers` is provided. Deterministic output is guaranteed for `--workers 1` with a fixed `--seed`.
+Parallel generation is enabled with `--workers`. The main thread keeps SQLite writes serialized, while worker threads generate accepted puzzles independently for each batch. Output is deterministic for a fixed `--seed`, `--difficulty`, `--symmetry`, `--batch-size`, and `--workers` value.
 
 ## Database
 
@@ -36,8 +36,10 @@ Implemented:
 - deterministic solved-board generation
 - brute-force uniqueness solver with MRV and bitmasks
 - clue removal with optional rotational 180 symmetry
-- human-style solver for naked singles, hidden singles, locked candidates, naked pairs, and hidden pairs
+- human-style solver for naked singles, hidden singles, locked candidates, naked pairs, hidden pairs, naked triples, and hidden triples
 - SQLite schema, indexes, WAL mode, and batch insertion
 - CLI progress and summary output
+- Rayon batch generation with serialized SQLite writes
+- timing summary for solved-board generation, digging, uniqueness checks, rating, and database insertion
 
-Hard techniques (`NakedTriple`, `HiddenTriple`, `XWing`) are represented in metadata but not yet fully implemented, so generated puzzles are not classified as `hard` unless those techniques are later detected by real implementations.
+`XWing` is represented in metadata as a placeholder for a future implementation. Puzzles are classified as `hard` only when implemented hard techniques such as naked or hidden triples are detected.

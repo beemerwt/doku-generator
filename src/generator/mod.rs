@@ -33,6 +33,22 @@ pub struct GenerationStats {
     pub candidates_attempted: u64,
     pub accepted_by_uniqueness: u64,
     pub accepted_by_difficulty: u64,
+    pub solved_generation_nanos: u128,
+    pub digging_nanos: u128,
+    pub uniqueness_nanos: u128,
+    pub rating_nanos: u128,
+}
+
+impl GenerationStats {
+    pub fn merge(&mut self, other: &GenerationStats) {
+        self.candidates_attempted += other.candidates_attempted;
+        self.accepted_by_uniqueness += other.accepted_by_uniqueness;
+        self.accepted_by_difficulty += other.accepted_by_difficulty;
+        self.solved_generation_nanos += other.solved_generation_nanos;
+        self.digging_nanos += other.digging_nanos;
+        self.uniqueness_nanos += other.uniqueness_nanos;
+        self.rating_nanos += other.rating_nanos;
+    }
 }
 
 #[allow(dead_code)]
@@ -61,21 +77,30 @@ pub fn generate_one_cancellable(
         let target = choose_target_difficulty(requested, global_rng);
         let solution_seed = global_rng.gen::<u64>();
         let removal_seed = global_rng.gen::<u64>();
+        let started = std::time::Instant::now();
         let solution = generate_solved_board(solution_seed)?;
+        stats.solved_generation_nanos += started.elapsed().as_nanos();
         if should_stop() {
             return Ok(None);
         }
+        let started = std::time::Instant::now();
         let puzzle = dig_puzzle(&solution, removal_seed, target, symmetry)?;
+        stats.digging_nanos += started.elapsed().as_nanos();
         if should_stop() {
             return Ok(None);
         }
 
+        let started = std::time::Instant::now();
         if !has_unique_solution(&puzzle) {
+            stats.uniqueness_nanos += started.elapsed().as_nanos();
             continue;
         }
+        stats.uniqueness_nanos += started.elapsed().as_nanos();
         stats.accepted_by_uniqueness += 1;
 
+        let started = std::time::Instant::now();
         let rating = rate_puzzle(&puzzle, target);
+        stats.rating_nanos += started.elapsed().as_nanos();
         if rating.difficulty != target {
             continue;
         }

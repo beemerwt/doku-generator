@@ -8,8 +8,10 @@ use std::{
 
 use anyhow::{bail, Result};
 use clap::{Args, Parser, Subcommand};
+use rand::Rng;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
+use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
 
 use crate::{
     db::{close_database, init_db, insert_puzzles, open_database},
@@ -76,6 +78,7 @@ fn generate(args: GenerateArgs) -> Result<()> {
     let seed = args.seed.unwrap_or(0);
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let shutdown = install_shutdown_handler()?;
+    let thread_pool = build_thread_pool(workers)?;
     let mut conn = open_database(&args.database)?;
     init_db(&conn)?;
 
@@ -85,38 +88,35 @@ fn generate(args: GenerateArgs) -> Result<()> {
     println!("Symmetry: {}", args.symmetry);
     println!("Workers: {}", if workers == 1 { 1 } else { workers });
     println!("Batch size: {}", args.batch_size);
-    if workers != 1 {
-        println!("Parallel generation is not enabled yet; using deterministic single-threaded generation.");
-    }
+    println!(
+        "Determinism: guaranteed for fixed seed, difficulty, symmetry, batch size, and worker count"
+    );
     println!();
 
     let started = Instant::now();
     let mut stats = GenerationStats::default();
     let mut inserted = 0usize;
     let mut duplicates = 0usize;
+    let mut db_insert_nanos = 0u128;
     let mut batch: Vec<GeneratedPuzzle> = Vec::with_capacity(args.batch_size);
 
     while inserted < args.count && !shutdown.load(Ordering::SeqCst) {
         batch.clear();
-        while batch.len() < args.batch_size
-            && inserted + batch.len() < args.count
-            && !shutdown.load(Ordering::SeqCst)
-        {
-            let generated = generate_one_cancellable(
-                args.difficulty,
-                &mut rng,
-                args.symmetry,
-                &mut stats,
-                || shutdown.load(Ordering::SeqCst),
-            )?;
-            let Some(generated) = generated else {
-                break;
-            };
-            batch.push(generated);
-        }
+        let requested = args.batch_size.min(args.count - inserted);
+        batch = generate_batch(
+            requested,
+            args.difficulty,
+            args.symmetry,
+            &mut rng,
+            &mut stats,
+            &shutdown,
+            thread_pool.as_ref(),
+        )?;
 
         if !batch.is_empty() {
+            let started = Instant::now();
             let actually_inserted = insert_puzzles(&mut conn, &batch)?;
+            db_insert_nanos += started.elapsed().as_nanos();
             inserted += actually_inserted;
             duplicates += batch.len().saturating_sub(actually_inserted);
             println!("Inserted {inserted}/{} puzzles", args.count);
@@ -148,9 +148,105 @@ fn generate(args: GenerateArgs) -> Result<()> {
     println!("Accepted by difficulty: {}", stats.accepted_by_difficulty);
     println!("Elapsed: {:.1}s", seconds);
     println!("Inserted puzzles/sec: {:.1}", per_second);
+    println!(
+        "Time solved board generation: {:.3}s",
+        nanos_to_seconds(stats.solved_generation_nanos)
+    );
+    println!(
+        "Time digging: {:.3}s",
+        nanos_to_seconds(stats.digging_nanos)
+    );
+    println!(
+        "Time uniqueness checks: {:.3}s",
+        nanos_to_seconds(stats.uniqueness_nanos)
+    );
+    println!("Time rating: {:.3}s", nanos_to_seconds(stats.rating_nanos));
+    println!(
+        "Time database insertion: {:.3}s",
+        nanos_to_seconds(db_insert_nanos)
+    );
     println!("Generator version: {GENERATOR_VERSION}");
 
     Ok(())
+}
+
+fn build_thread_pool(workers: usize) -> Result<Option<ThreadPool>> {
+    if workers <= 1 {
+        return Ok(None);
+    }
+    Ok(Some(ThreadPoolBuilder::new().num_threads(workers).build()?))
+}
+
+fn generate_batch(
+    requested: usize,
+    difficulty: Difficulty,
+    symmetry: SymmetryMode,
+    rng: &mut ChaCha8Rng,
+    stats: &mut GenerationStats,
+    shutdown: &Arc<AtomicBool>,
+    thread_pool: Option<&ThreadPool>,
+) -> Result<Vec<GeneratedPuzzle>> {
+    if requested == 0 || shutdown.load(Ordering::SeqCst) {
+        return Ok(Vec::new());
+    }
+
+    let job_seeds = (0..requested).map(|_| rng.gen::<u64>()).collect::<Vec<_>>();
+
+    if let Some(thread_pool) = thread_pool {
+        let generated = thread_pool.install(|| {
+            job_seeds
+                .par_iter()
+                .map(|&job_seed| {
+                    let mut local_rng = ChaCha8Rng::seed_from_u64(job_seed);
+                    let mut local_stats = GenerationStats::default();
+                    let generated = generate_one_cancellable(
+                        difficulty,
+                        &mut local_rng,
+                        symmetry,
+                        &mut local_stats,
+                        || shutdown.load(Ordering::SeqCst),
+                    )?;
+                    Ok::<_, anyhow::Error>((generated, local_stats))
+                })
+                .collect::<Vec<_>>()
+        });
+
+        let mut batch = Vec::with_capacity(requested);
+        for item in generated {
+            let (generated, local_stats) = item?;
+            stats.merge(&local_stats);
+            if let Some(generated) = generated {
+                batch.push(generated);
+            }
+        }
+        Ok(batch)
+    } else {
+        let mut batch = Vec::with_capacity(requested);
+        for job_seed in job_seeds {
+            if shutdown.load(Ordering::SeqCst) {
+                break;
+            }
+            let mut local_rng = ChaCha8Rng::seed_from_u64(job_seed);
+            let mut local_stats = GenerationStats::default();
+            let generated = generate_one_cancellable(
+                difficulty,
+                &mut local_rng,
+                symmetry,
+                &mut local_stats,
+                || shutdown.load(Ordering::SeqCst),
+            )?;
+            stats.merge(&local_stats);
+            let Some(generated) = generated else {
+                break;
+            };
+            batch.push(generated);
+        }
+        Ok(batch)
+    }
+}
+
+fn nanos_to_seconds(nanos: u128) -> f64 {
+    nanos as f64 / 1_000_000_000.0
 }
 
 fn install_shutdown_handler() -> Result<Arc<AtomicBool>> {

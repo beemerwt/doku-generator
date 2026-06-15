@@ -5,7 +5,7 @@ use crate::{
     difficulty::Difficulty,
     solver::candidates::{
         box_of, candidates_for, col_of, mask_contains, mask_count, mask_single_digit, row_of,
-        units, ALL_DIGITS_MASK,
+        ALL_DIGITS_MASK, UNITS,
     },
 };
 
@@ -161,7 +161,7 @@ fn apply_naked_single(state: &mut CandidateState) -> Option<SolveStep> {
 }
 
 fn apply_hidden_single(state: &mut CandidateState) -> Option<SolveStep> {
-    for unit in units() {
+    for unit in UNITS {
         for digit in 1..=9 {
             let mut found = None;
             let mut count = 0;
@@ -249,7 +249,7 @@ fn apply_locked_candidate(state: &mut CandidateState) -> Option<SolveStep> {
 }
 
 fn apply_naked_pair(state: &mut CandidateState) -> Option<SolveStep> {
-    for unit in units() {
+    for unit in UNITS {
         for a in 0..8 {
             let idx_a = unit[a];
             let mask = state.masks[idx_a];
@@ -286,7 +286,7 @@ fn apply_naked_pair(state: &mut CandidateState) -> Option<SolveStep> {
 }
 
 fn apply_hidden_pair(state: &mut CandidateState) -> Option<SolveStep> {
-    for unit in units() {
+    for unit in UNITS {
         for d1 in 1..=8 {
             for d2 in d1 + 1..=9 {
                 let pair_mask = crate::solver::candidates::digit_bit(d1)
@@ -337,7 +337,7 @@ fn apply_hidden_pair(state: &mut CandidateState) -> Option<SolveStep> {
 }
 
 fn apply_naked_triple(state: &mut CandidateState) -> Option<SolveStep> {
-    for unit in units() {
+    for unit in UNITS {
         let empty = unit
             .iter()
             .copied()
@@ -383,7 +383,7 @@ fn apply_naked_triple(state: &mut CandidateState) -> Option<SolveStep> {
 }
 
 fn apply_hidden_triple(state: &mut CandidateState) -> Option<SolveStep> {
-    for unit in units() {
+    for unit in UNITS {
         for d1 in 1..=7 {
             for d2 in d1 + 1..=8 {
                 for d3 in d2 + 1..=9 {
