@@ -27,7 +27,7 @@ Parallel generation is enabled with `--workers`. The main thread keeps SQLite wr
 
 ## Database
 
-The database is created automatically if it does not exist. Puzzle strings are stored as 81 characters using digits `1-9` and `.` for blanks. Solution strings are 81 digits.
+The database is created automatically if it does not exist. Puzzle strings are stored as 81 characters using digits `1-9` and `0` for blanks. Solution strings are 81 digits.
 
 ## Status
 
@@ -36,10 +36,10 @@ Implemented:
 - deterministic solved-board generation
 - brute-force uniqueness solver with MRV and bitmasks
 - clue removal with optional rotational 180 symmetry
-- human-style solver for naked singles, hidden singles, locked candidates, naked pairs, hidden pairs, naked triples, and hidden triples
+- human-style solver for naked singles, hidden singles, locked candidates, naked pairs, hidden pairs, naked triples, hidden triples, and X-Wing
 - SQLite schema, indexes, WAL mode, and batch insertion
 - CLI progress and summary output
 - Rayon batch generation with serialized SQLite writes
 - timing summary for solved-board generation, digging, uniqueness checks, rating, and database insertion
 
-`XWing` is represented in metadata as a placeholder for a future implementation. Puzzles are classified as `hard` only when implemented hard techniques such as naked or hidden triples are detected.
+Puzzles are classified as `hard` only when implemented hard techniques such as naked triples, hidden triples, or X-Wing are detected.

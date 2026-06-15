@@ -132,4 +132,9 @@ mod tests {
     fn rejects_bad_length() {
         assert!(Board::from_str81("0").is_err());
     }
+
+    #[test]
+    fn rejects_dot_blanks() {
+        assert!(Board::from_str81(&".".repeat(81)).is_err());
+    }
 }

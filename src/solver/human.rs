@@ -117,6 +117,8 @@ pub fn solve_human(board: &Board) -> HumanSolveResult {
             steps.push(step);
         } else if let Some(step) = apply_hidden_triple(&mut state) {
             steps.push(step);
+        } else if let Some(step) = apply_x_wing(&mut state) {
+            steps.push(step);
         } else {
             break;
         }
@@ -439,6 +441,122 @@ fn apply_hidden_triple(state: &mut CandidateState) -> Option<SolveStep> {
     None
 }
 
+fn apply_x_wing(state: &mut CandidateState) -> Option<SolveStep> {
+    for digit in 1..=9 {
+        if let Some(step) = apply_row_x_wing(state, digit) {
+            return Some(step);
+        }
+        if let Some(step) = apply_col_x_wing(state, digit) {
+            return Some(step);
+        }
+    }
+    None
+}
+
+fn apply_row_x_wing(state: &mut CandidateState, digit: u8) -> Option<SolveStep> {
+    let mut row_masks = [0u16; 9];
+
+    for (row, row_mask) in row_masks.iter_mut().enumerate() {
+        for col in 0..9 {
+            let index = row * 9 + col;
+            if state.board.get_index(index) == 0 && mask_contains(state.masks[index], digit) {
+                *row_mask |= 1 << col;
+            }
+        }
+    }
+
+    for row_a in 0..8 {
+        if mask_count(row_masks[row_a]) != 2 {
+            continue;
+        }
+        for row_b in row_a + 1..9 {
+            if row_masks[row_a] != row_masks[row_b] || mask_count(row_masks[row_b]) != 2 {
+                continue;
+            }
+
+            let mut eliminated = Vec::new();
+            for col in 0..9 {
+                if row_masks[row_a] & (1 << col) == 0 {
+                    continue;
+                }
+                for row in 0..9 {
+                    if row == row_a || row == row_b {
+                        continue;
+                    }
+                    let index = row * 9 + col;
+                    if state.board.get_index(index) == 0 && mask_contains(state.masks[index], digit)
+                    {
+                        eliminated.push((index, digit));
+                    }
+                }
+            }
+
+            if !eliminated.is_empty() && state.eliminate(&eliminated) {
+                return Some(SolveStep {
+                    technique: Technique::XWing,
+                    cell: None,
+                    digit: Some(digit),
+                    eliminated,
+                });
+            }
+        }
+    }
+
+    None
+}
+
+fn apply_col_x_wing(state: &mut CandidateState, digit: u8) -> Option<SolveStep> {
+    let mut col_masks = [0u16; 9];
+
+    for (col, col_mask) in col_masks.iter_mut().enumerate() {
+        for row in 0..9 {
+            let index = row * 9 + col;
+            if state.board.get_index(index) == 0 && mask_contains(state.masks[index], digit) {
+                *col_mask |= 1 << row;
+            }
+        }
+    }
+
+    for col_a in 0..8 {
+        if mask_count(col_masks[col_a]) != 2 {
+            continue;
+        }
+        for col_b in col_a + 1..9 {
+            if col_masks[col_a] != col_masks[col_b] || mask_count(col_masks[col_b]) != 2 {
+                continue;
+            }
+
+            let mut eliminated = Vec::new();
+            for row in 0..9 {
+                if col_masks[col_a] & (1 << row) == 0 {
+                    continue;
+                }
+                for col in 0..9 {
+                    if col == col_a || col == col_b {
+                        continue;
+                    }
+                    let index = row * 9 + col;
+                    if state.board.get_index(index) == 0 && mask_contains(state.masks[index], digit)
+                    {
+                        eliminated.push((index, digit));
+                    }
+                }
+            }
+
+            if !eliminated.is_empty() && state.eliminate(&eliminated) {
+                return Some(SolveStep {
+                    technique: Technique::XWing,
+                    cell: None,
+                    digit: Some(digit),
+                    eliminated,
+                });
+            }
+        }
+    }
+
+    None
+}
+
 fn ordered_used_techniques(steps: &[SolveStep]) -> Vec<Technique> {
     let order = [
         Technique::NakedSingle,
@@ -502,4 +620,52 @@ fn classify_human_result(
         return Difficulty::Medium;
     }
     Difficulty::Easy
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::solver::candidates::digit_bit;
+
+    #[test]
+    fn row_x_wing_eliminates_from_matching_columns() {
+        let mut state = CandidateState {
+            board: Board::empty(),
+            masks: [0; 81],
+        };
+        let bit = digit_bit(5);
+        state.masks[2] = bit;
+        state.masks[6] = bit;
+        state.masks[11] = bit;
+        state.masks[15] = bit;
+        state.masks[20] = bit;
+        state.masks[24] = bit;
+
+        let step = apply_x_wing(&mut state).unwrap();
+
+        assert_eq!(step.technique, Technique::XWing);
+        assert_eq!(step.digit, Some(5));
+        assert!(!mask_contains(state.masks[20], 5));
+        assert!(!mask_contains(state.masks[24], 5));
+    }
+
+    #[test]
+    fn col_x_wing_eliminates_from_matching_rows() {
+        let mut state = CandidateState {
+            board: Board::empty(),
+            masks: [0; 81],
+        };
+        let bit = digit_bit(7);
+        state.masks[9] = bit;
+        state.masks[45] = bit;
+        state.masks[11] = bit;
+        state.masks[47] = bit;
+        state.masks[10] = bit;
+
+        let step = apply_x_wing(&mut state).unwrap();
+
+        assert_eq!(step.technique, Technique::XWing);
+        assert_eq!(step.digit, Some(7));
+        assert!(!mask_contains(state.masks[10], 7));
+    }
 }
